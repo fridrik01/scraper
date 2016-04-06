@@ -43,7 +43,7 @@ func scrapeSearchPage(searchTerm string, page int) (SearchResult, error) {
 
 	err := cmd.Start()
 	if err != nil {
-		return err
+		return SearchResult{}, err
 	}
 
 	done := make(chan error, 1)
@@ -55,14 +55,14 @@ func scrapeSearchPage(searchTerm string, page int) (SearchResult, error) {
 	select {
 	case <-time.After(1 * time.Minute):
 		if err := cmd.Process.Kill(); err != nil {
-			return err
+			return SearchResult{}, err
 		}
 		log.Println("process killed as timeout reached")
-		return nil
+		return SearchResult{}, nil
 	case err := <-done:
 		if err != nil {
 			log.Printf("process done with error = %v", err)
-			return nil
+			return SearchResult{}, nil
 		}
 		output = out.Bytes()
 	}

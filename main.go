@@ -27,10 +27,8 @@ type ProductInfo struct {
 	Images []string `json:"images"`
 }
 
-var nrThreads = flag.Int("nr-threads", 1, "How many concurrent threads to use")
-
 func scrapeSearchPage(searchTerm string, page int) (SearchResult, error) {
-	log.Printf("Searching %s", searchTerm)
+	log.Printf("Searching %s at page %d", searchTerm, page)
 
 	args := []string{
 		"taobao_search.js",
@@ -38,16 +36,42 @@ func scrapeSearchPage(searchTerm string, page int) (SearchResult, error) {
 		strconv.Itoa(page),
 	}
 
-	output, err := exec.Command("node", args...).CombinedOutput()
+	cmd := exec.Command("node", args...)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Start()
 	if err != nil {
-		log.Fatalf("%v: %v\n", err, string(output))
+		return err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	var output []byte
+	select {
+	case <-time.After(1 * time.Minute):
+		if err := cmd.Process.Kill(); err != nil {
+			return err
+		}
+		log.Println("process killed as timeout reached")
+		return nil
+	case err := <-done:
+		if err != nil {
+			log.Printf("process done with error = %v", err)
+			return nil
+		}
+		output = out.Bytes()
 	}
 
 	// unmarshal the response
 	var sr SearchResult
 	err = json.Unmarshal(output, &sr)
 	if err != nil {
-		log.Fatal(err)
+		return SearchResult{}, err
 	}
 
 	return sr, nil
@@ -68,7 +92,7 @@ func scrapeDetailsPage(searchTerm, detailsPageURL string) error {
 
 	err := cmd.Start()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	done := make(chan error, 1)
@@ -80,7 +104,7 @@ func scrapeDetailsPage(searchTerm, detailsPageURL string) error {
 	select {
 	case <-time.After(1 * time.Minute):
 		if err := cmd.Process.Kill(); err != nil {
-			log.Fatal("failed to kill: ", err)
+			return err
 		}
 		log.Println("process killed as timeout reached")
 		return nil
@@ -98,12 +122,12 @@ func scrapeDetailsPage(searchTerm, detailsPageURL string) error {
 	var pi ProductInfo
 	err = json.Unmarshal(output, &pi)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	err = os.MkdirAll(filepath.Join("downloads", searchTerm, pi.Name), 0777)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	for _, imageURL := range pi.Images {
@@ -111,7 +135,7 @@ func scrapeDetailsPage(searchTerm, detailsPageURL string) error {
 		dst := filepath.Join("downloads", searchTerm, pi.Name, filename)
 		err = download(imageURL, dst)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
 
@@ -158,7 +182,8 @@ func main() {
 			searchTerm := scanner.Text()
 			sr, err := scrapeSearchPage(searchTerm, page)
 			if err != nil {
-				log.Fatal(err)
+				log.Printf("Error %s when running scrapeSearchPage", err)
+				continue
 			}
 
 			for _, url := range sr.ProductURLS {

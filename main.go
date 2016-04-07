@@ -189,7 +189,7 @@ func main() {
 			for _, url := range sr.ProductURLS {
 				err = scrapeDetailsPage(searchTerm, url)
 				if err != nil {
-					log.Fatal(err)
+					log.Print(err)
 				}
 			}
 		}
